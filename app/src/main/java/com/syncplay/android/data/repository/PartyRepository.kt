@@ -1,11 +1,17 @@
 package com.syncplay.android.data.repository
 
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.util.Log
+import com.syncplay.android.data.audio.AudioStreamConfig
+import com.syncplay.android.data.audio.ScheduledAudioPlayer
+import com.syncplay.android.data.audio.UdpAudioReceiver
 import com.syncplay.android.data.model.ConnectedDevice
 import com.syncplay.android.data.model.ConnectionStatus
 import com.syncplay.android.data.model.DiscoveredHost
 import com.syncplay.android.data.model.PartyRole
+import com.syncplay.android.data.model.ProtocolMessage
 import com.syncplay.android.data.network.DeviceIdentity
 import com.syncplay.android.data.network.MulticastLockManager
 import com.syncplay.android.data.network.NetworkConstants
@@ -13,6 +19,7 @@ import com.syncplay.android.data.network.NsdHelper
 import com.syncplay.android.data.network.TcpClient
 import com.syncplay.android.data.network.TcpHostServer
 import com.syncplay.android.data.sync.TimeSyncManager
+import com.syncplay.android.service.AudioCaptureService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,8 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Single source of truth for party networking (Phase 1) and clock sync (Phase 2).
- * Owns NSD advertise/discover lifecycle, TCP host/client instances, and [TimeSyncManager] role.
+ * Orchestrates Phase 1 networking, Phase 2 clock sync, and Phase 3 UDP audio streaming.
  */
 class PartyRepository(context: Context) {
     private val tag = "SyncPlayRepo"
@@ -42,6 +48,10 @@ class PartyRepository(context: Context) {
     private var discoveryJob: Job? = null
     private var hostDevicesJob: Job? = null
     private var clientStateJob: Job? = null
+    private var clientEventJob: Job? = null
+
+    private var udpReceiver: UdpAudioReceiver? = null
+    private var audioPlayer: ScheduledAudioPlayer? = null
 
     private val _role = MutableStateFlow(PartyRole.NONE)
     val role: StateFlow<PartyRole> = _role.asStateFlow()
@@ -64,8 +74,19 @@ class PartyRepository(context: Context) {
     private val _sessionId = MutableStateFlow<String?>(null)
     val sessionId: StateFlow<String?> = _sessionId.asStateFlow()
 
-    /** Phase 2 clock-sync snapshot (offset / RTT / synced flag). */
     val timeSyncState: StateFlow<TimeSyncManager.SyncState> = TimeSyncManager.state
+
+    private val _audioStreaming = MutableStateFlow(false)
+    val audioStreaming: StateFlow<Boolean> = _audioStreaming.asStateFlow()
+
+    private val _audioStatusMessage = MutableStateFlow<String?>(null)
+    val audioStatusMessage: StateFlow<String?> = _audioStatusMessage.asStateFlow()
+
+    private val _manualOffsetMs = MutableStateFlow(0)
+    val manualOffsetMs: StateFlow<Int> = _manualOffsetMs.asStateFlow()
+
+    private val _clientPlaybackActive = MutableStateFlow(false)
+    val clientPlaybackActive: StateFlow<Boolean> = _clientPlaybackActive.asStateFlow()
 
     suspend fun startHosting() {
         stopAllInternal(clearStatus = false)
@@ -85,6 +106,9 @@ class PartyRepository(context: Context) {
             hostDevicesJob = scope.launch {
                 server.connectedDevices.collect { devices ->
                     _connectedDevices.value = devices
+                    if (_audioStreaming.value) {
+                        AudioCaptureService.refreshTargets(appContext)
+                    }
                 }
             }
 
@@ -121,10 +145,8 @@ class PartyRepository(context: Context) {
             try {
                 nsdHelper.discoverHosts().collect { hosts ->
                     _discoveredHosts.value = hosts
-                    // Auto-connect to the first resolved host for Phase 1 UX.
                     if (tcpClient == null && hosts.isNotEmpty()) {
-                        val target = hosts.first()
-                        connectToHost(target)
+                        connectToHost(hosts.first())
                     }
                 }
             } catch (t: Throwable) {
@@ -155,9 +177,11 @@ class PartyRepository(context: Context) {
                         )
                     }
                     is TcpClient.ClientConnectionState.Failed -> {
+                        stopClientAudio()
                         _status.value = ConnectionStatus.Failed(state.message)
                     }
                     is TcpClient.ClientConnectionState.Disconnected -> {
+                        stopClientAudio()
                         if (_role.value == PartyRole.CLIENT) {
                             _status.value = ConnectionStatus.Stopped
                         }
@@ -172,14 +196,75 @@ class PartyRepository(context: Context) {
             }
         }
 
+        clientEventJob = scope.launch {
+            client.events.collect { event ->
+                when (event) {
+                    is TcpClient.ClientEvent.AudioSessionStarted -> startClientAudio(event.session)
+                    is TcpClient.ClientEvent.AudioSessionStopped -> stopClientAudio()
+                    else -> Unit
+                }
+            }
+        }
+
         try {
             client.connect(host.hostAddress, host.port)
         } catch (t: Throwable) {
             tcpClient = null
             _status.value = ConnectionStatus.Failed(t.message ?: "Could not connect to host")
-            // Resume discovery so the client can find another / retry.
             startDiscovery()
         }
+    }
+
+    /**
+     * Starts Phase 3 host capture after the user grants MediaProjection.
+     */
+    fun startHostAudioStreaming(resultCode: Int, data: Intent) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            _audioStatusMessage.value = "System audio capture requires Android 10+"
+            return
+        }
+        if (_role.value != PartyRole.HOST) {
+            _audioStatusMessage.value = "Host a party before streaming"
+            return
+        }
+        _audioStatusMessage.value = "Starting capture…"
+        AudioCaptureService.start(appContext, resultCode, data)
+    }
+
+    fun stopHostAudioStreaming() {
+        AudioCaptureService.stop(appContext)
+    }
+
+    fun onHostAudioStreamingStarted() {
+        _audioStreaming.value = true
+        _audioStatusMessage.value = "Streaming system audio (UDP :${AudioStreamConfig.UDP_PORT})"
+        val session = ProtocolMessage.AudioSession(
+            udpPort = AudioStreamConfig.UDP_PORT,
+            sampleRate = AudioStreamConfig.SAMPLE_RATE_HZ,
+            channelCount = AudioStreamConfig.CHANNEL_COUNT,
+            presentationBufferMs = AudioStreamConfig.PRESENTATION_BUFFER_MS,
+        )
+        hostServer?.broadcastAudioSession(session)
+        AudioCaptureService.refreshTargets(appContext)
+    }
+
+    fun onHostAudioStreamingStopped() {
+        if (_audioStreaming.value) {
+            hostServer?.broadcastAudioStop()
+        }
+        _audioStreaming.value = false
+        _audioStatusMessage.value = null
+    }
+
+    fun onHostAudioStreamingFailed(message: String?) {
+        _audioStreaming.value = false
+        _audioStatusMessage.value = message ?: "Audio capture failed"
+    }
+
+    fun setManualOffsetMs(offsetMs: Int) {
+        val coerced = offsetMs.coerceIn(-200, 800)
+        _manualOffsetMs.value = coerced
+        audioPlayer?.setManualOffsetMs(coerced)
     }
 
     fun stopHosting() {
@@ -197,6 +282,40 @@ class PartyRepository(context: Context) {
         _status.value = ConnectionStatus.Idle
     }
 
+    private fun startClientAudio(session: ProtocolMessage.AudioSession) {
+        stopClientAudio()
+        val player = ScheduledAudioPlayer().also {
+            it.setManualOffsetMs(_manualOffsetMs.value)
+            it.start()
+        }
+        audioPlayer = player
+
+        val receiver = UdpAudioReceiver(port = session.udpPort) { packet ->
+            player.enqueue(packet)
+        }
+        runCatching { receiver.start() }
+            .onFailure {
+                Log.e(tag, "UDP receiver failed", it)
+                _audioStatusMessage.value = "UDP listen failed: ${it.message}"
+                player.stop()
+                audioPlayer = null
+                return
+            }
+        udpReceiver = receiver
+        _clientPlaybackActive.value = true
+        _audioStatusMessage.value =
+            "Playing UDP audio · PTS buffer ${session.presentationBufferMs} ms"
+        Log.i(tag, "Client audio pipeline started on :${session.udpPort}")
+    }
+
+    private fun stopClientAudio() {
+        runCatching { udpReceiver?.stop() }
+        udpReceiver = null
+        runCatching { audioPlayer?.stop() }
+        audioPlayer = null
+        _clientPlaybackActive.value = false
+    }
+
     private fun stopAllInternal(clearStatus: Boolean) {
         discoveryJob?.cancel()
         discoveryJob = null
@@ -204,6 +323,13 @@ class PartyRepository(context: Context) {
         hostDevicesJob = null
         clientStateJob?.cancel()
         clientStateJob = null
+        clientEventJob?.cancel()
+        clientEventJob = null
+
+        if (_audioStreaming.value || _role.value == PartyRole.HOST) {
+            runCatching { AudioCaptureService.stop(appContext) }
+        }
+        stopClientAudio()
 
         runCatching { nsdHelper.unregister() }
         runCatching { hostServer?.stop() }
@@ -216,6 +342,8 @@ class PartyRepository(context: Context) {
         _discoveredHosts.value = emptyList()
         _hostPort.value = null
         _sessionId.value = null
+        _audioStreaming.value = false
+        _audioStatusMessage.value = null
         _role.value = PartyRole.NONE
         if (clearStatus) {
             _status.value = ConnectionStatus.Idle

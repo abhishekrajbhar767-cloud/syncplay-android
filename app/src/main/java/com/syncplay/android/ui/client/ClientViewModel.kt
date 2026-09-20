@@ -18,23 +18,38 @@ data class ClientUiState(
     val deviceName: String = "",
     val errorMessage: String? = null,
     val timeSync: TimeSyncManager.SyncState = TimeSyncManager.SyncState(),
+    val manualOffsetMs: Int = 0,
+    val playbackActive: Boolean = false,
+    val audioStatusMessage: String? = null,
 )
 
 class ClientViewModel(
     private val repository: PartyRepository,
 ) : ViewModel() {
 
-    val uiState: StateFlow<ClientUiState> = combine(
+    private val connection = combine(
         repository.status,
         repository.discoveredHosts,
         repository.timeSyncState,
     ) { status, hosts, timeSync ->
+        ConnectionSlice(status, hosts, timeSync)
+    }
+
+    val uiState: StateFlow<ClientUiState> = combine(
+        connection,
+        repository.manualOffsetMs,
+        repository.clientPlaybackActive,
+        repository.audioStatusMessage,
+    ) { conn, offset, playback, audioMsg ->
         ClientUiState(
-            status = status,
-            discoveredHosts = hosts,
+            status = conn.status,
+            discoveredHosts = conn.hosts,
             deviceName = repository.deviceName,
-            errorMessage = (status as? ConnectionStatus.Failed)?.message,
-            timeSync = timeSync,
+            errorMessage = (conn.status as? ConnectionStatus.Failed)?.message,
+            timeSync = conn.timeSync,
+            manualOffsetMs = offset,
+            playbackActive = playback,
+            audioStatusMessage = audioMsg,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -49,6 +64,16 @@ class ClientViewModel(
     fun leaveParty() {
         repository.leaveParty()
     }
+
+    fun setManualOffsetMs(offsetMs: Int) {
+        repository.setManualOffsetMs(offsetMs)
+    }
+
+    private data class ConnectionSlice(
+        val status: ConnectionStatus,
+        val hosts: List<DiscoveredHost>,
+        val timeSync: TimeSyncManager.SyncState,
+    )
 
     companion object {
         fun factory(repository: PartyRepository): ViewModelProvider.Factory =

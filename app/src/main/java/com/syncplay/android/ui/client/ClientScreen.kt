@@ -10,11 +10,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +32,7 @@ import com.syncplay.android.ui.components.SyncPlayBackground
 import com.syncplay.android.ui.theme.Coral
 import com.syncplay.android.ui.theme.Mist
 import com.syncplay.android.ui.theme.Sand
+import com.syncplay.android.ui.theme.Teal
 import com.syncplay.android.ui.theme.TealBright
 
 @Composable
@@ -37,6 +41,7 @@ fun ClientScreen(
     onStart: () -> Unit,
     onLeave: () -> Unit,
     onBack: () -> Unit,
+    onManualOffsetChanged: (Int) -> Unit,
 ) {
     LaunchedEffect(Unit) {
         if (state.status !is ConnectionStatus.Connected &&
@@ -127,6 +132,39 @@ fun ClientScreen(
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (sync.isSynced) TealBright else Mist,
+                        )
+                        if (state.playbackActive || state.audioStatusMessage != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = state.audioStatusMessage
+                                    ?: if (state.playbackActive) "Playing scheduled UDP audio" else "",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TealBright,
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(28.dp))
+                        Text(
+                            text = "Bluetooth / speaker offset",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Sand,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${state.manualOffsetMs} ms  ·  added to scheduled play time",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Mist,
+                        )
+                        Slider(
+                            value = state.manualOffsetMs.toFloat(),
+                            onValueChange = { onManualOffsetChanged(it.toInt()) },
+                            valueRange = -100f..500f,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = SliderDefaults.colors(
+                                thumbColor = TealBright,
+                                activeTrackColor = Teal,
+                                inactiveTrackColor = Mist.copy(alpha = 0.35f),
+                            ),
                         )
                     }
                     is ConnectionStatus.Searching -> {

@@ -1,5 +1,6 @@
 package com.syncplay.android.ui.navigation
 
+import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
@@ -18,6 +19,7 @@ import com.syncplay.android.ui.host.HostViewModel
 @Composable
 fun SyncPlayNavGraph(
     onRequestNearbyPermission: (onGranted: () -> Unit) -> Unit,
+    onRequestAudioCapture: (onGranted: (resultCode: Int, data: Intent) -> Unit) -> Unit,
 ) {
     val navController = rememberNavController()
     val app = LocalContext.current.applicationContext as SyncPlayApp
@@ -52,6 +54,12 @@ fun SyncPlayNavGraph(
                     repository.resetToIdle()
                     navController.popBackStack()
                 },
+                onRequestStartStreaming = {
+                    onRequestAudioCapture { resultCode, data ->
+                        viewModel.startAudioStreaming(resultCode, data)
+                    }
+                },
+                onStopStreaming = viewModel::stopAudioStreaming,
             )
         }
 
@@ -68,6 +76,7 @@ fun SyncPlayNavGraph(
                     repository.resetToIdle()
                     navController.popBackStack()
                 },
+                onManualOffsetChanged = viewModel::setManualOffsetMs,
             )
         }
     }

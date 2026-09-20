@@ -8,4 +8,12 @@
     <string name="stop_hosting">Stop Hosting</string>
     <string name="leave_party">Leave Party</string>
     <string name="no_clients_yet">Waiting for clients to join…</string>
+    <string name="start_streaming">Start Audio Stream</string>
+    <string name="stop_streaming">Stop Audio Stream</string>
+    <string name="streaming_active">Streaming system audio over UDP</string>
+    <string name="latency_slider_label">Bluetooth / speaker offset</string>
+    <string name="audio_service_title">SyncPlay streaming</string>
+    <string name="audio_service_text">Capturing system audio for the party</string>
+    <string name="audio_service_channel">Audio capture</string>
+    <string name="audio_service_channel_desc">Keeps SyncPlay audio capture running</string>
 </resources>

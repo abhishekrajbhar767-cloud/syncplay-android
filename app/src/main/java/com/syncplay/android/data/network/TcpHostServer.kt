@@ -60,6 +60,9 @@ class TcpHostServer(
 
     private val clients = ConcurrentHashMap<String, ClientSession>()
 
+    @Volatile
+    private var activeAudioSession: ProtocolMessage.AudioSession? = null
+
     private val _connectedDevices = MutableStateFlow<List<ConnectedDevice>>(emptyList())
     val connectedDevices: StateFlow<List<ConnectedDevice>> = _connectedDevices.asStateFlow()
 
@@ -95,6 +98,7 @@ class TcpHostServer(
     fun stop() {
         if (!running.getAndSet(false) && serverSocket == null && clients.isEmpty()) return
         _isRunning.value = false
+        activeAudioSession = null
 
         clients.values.forEach { session ->
             runCatching { session.close() }
@@ -109,6 +113,36 @@ class TcpHostServer(
         scope.cancel()
         runCatching { clientPool.close() }
         Log.i(tag, "Host server stopped")
+    }
+
+    /**
+     * Announces a live UDP audio session to every connected client (and to future joiners).
+     */
+    fun broadcastAudioSession(session: ProtocolMessage.AudioSession) {
+        activeAudioSession = session
+        scope.launch {
+            clients.values.forEach { client ->
+                runCatching { client.send(session) }
+            }
+        }
+    }
+
+    fun broadcastAudioStop(reason: String = "host_stopped") {
+        activeAudioSession = null
+        val stop = ProtocolMessage.AudioStop(reason = reason)
+        scope.launch {
+            clients.values.forEach { client ->
+                runCatching { client.send(stop) }
+            }
+        }
+    }
+
+    fun broadcast(message: ProtocolMessage) {
+        scope.launch {
+            clients.values.forEach { client ->
+                runCatching { client.send(message) }
+            }
+        }
     }
 
     private fun tryBind(preferredPort: Int): ServerSocket {
@@ -183,6 +217,11 @@ class TcpHostServer(
                     sessionId = sessionId,
                 )
             )
+
+            // If audio is already streaming, push the session config to late joiners.
+            activeAudioSession?.let { audio ->
+                runCatching { session.send(audio) }
+            }
 
             Log.i(tag, "Client connected: ${hello.deviceName} ($remoteIp)")
 
