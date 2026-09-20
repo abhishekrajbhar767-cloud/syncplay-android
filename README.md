@@ -1,58 +1,55 @@
-# SyncPlay (Android) — Phases 1–2
+# SyncPlay (Android) — Phases 1–3
 
 Local-network multi-device synchronized audio streaming. **No internet required.**
 
 | Phase | Status | Scope |
 |-------|--------|--------|
 | **1** | Done | NSD discovery, TCP host/client, heartbeat, Compose UI |
-| **2** | Done | Custom NTP clock sync (ms offset) over the control channel |
-| **3+** | Next | Audio capture / sync playback |
+| **2** | Done | Custom NTP clock sync (ms offset) over TCP |
+| **3** | Done | System audio capture + UDP PCM streaming + scheduled playback |
+| **4+** | Next | Codec compression, Wi‑Fi Direct hardening, UX polish |
 
 ## Architecture (MVVM)
 
 ```
 UI (Compose)
-  HomeScreen / HostScreen / ClientScreen
+  Home / Host (Start Audio Stream) / Client (latency slider)
         │
    ViewModels
         │
    PartyRepository
-        ├── NsdHelper              ← `_audio_sync._tcp.`
-        ├── TcpHostServer          ← multi-client + PING + SYNC_RES
-        ├── TcpClient              ← HELLO + PONG + SYNC_REQ loop
-        ├── TimeSyncManager        ← NTP offset / getSyncedTimeMs()
-        └── MulticastLockManager
+        ├── NsdHelper + TcpHostServer / TcpClient
+        ├── TimeSyncManager
+        ├── AudioCaptureService  ← MediaProjection + AudioPlaybackCapture
+        ├── UdpAudioBroadcaster  ← Host UDP + PTS header
+        ├── UdpAudioReceiver     ← Client UDP
+        └── ScheduledAudioPlayer ← play when synced clock ≥ PTS + manualOffset
 ```
 
-### Wire protocol
+### Phase 3 audio path
 
-Line-delimited JSON over TCP (default port `9090`):
+1. Host taps **Start Audio Stream** → MediaProjection consent → foreground service.
+2. `AudioPlaybackCapture` reads system PCM (48 kHz stereo 16-bit) in ~10 ms frames.
+3. Each UDP datagram carries `presentationTimestampMs = getSyncedTimeMs() + 200`.
+4. Clients receive frames, buffer them, and `AudioTrack`-play exactly at PTS (+ optional Bluetooth offset slider).
 
-| Message | Direction | Purpose |
-|---------|-----------|---------|
-| `HELLO` / `WELCOME` | handshake | identity + session |
-| `PING` / `PONG` | heartbeat | liveness (every 2s) |
-| `SYNC_REQ` / `SYNC_RES` | NTP | T1–T4 clock sync (every 3–5s) |
-| `DISCONNECT` | either | graceful teardown |
+### Wire protocol (TCP control)
 
-### Phase 2 NTP
+| Message | Purpose |
+|---------|---------|
+| `HELLO` / `WELCOME` / `PING` / `PONG` | Phase 1 |
+| `SYNC_REQ` / `SYNC_RES` | Phase 2 NTP |
+| `AUDIO_SESSION` / `AUDIO_STOP` | Phase 3 UDP session announce |
 
-```
-RTT    = (T4 - T1) - (T3 - T2)
-Offset = ((T2 - T1) + (T3 - T4)) / 2
-```
+Audio PCM itself is **UDP-only** (port `9091`).
 
-- **Host** → `TimeSyncManager.getSyncedTimeMs()` = `System.currentTimeMillis()`
-- **Client** → `System.currentTimeMillis() + Offset`
-- Samples with RTT > 500ms are discarded; the lowest-RTT sample in an 8-deep window wins.
+## Run on devices (Android 10+)
 
-## Run on devices
-
-1. Open in Android Studio (Ladybug+ / AGP 8.7).
-2. Install on 2–3 phones on the same Wi‑Fi or hotspot.
-3. Grant nearby Wi‑Fi / location permission.
-4. A → **Host Party**; B/C → **Join Party**.
-5. Client shows *Clock synced · offset X ms · Y ms RTT* after the first NTP exchange.
+1. Open in Android Studio; install on 2–3 phones (same Wi‑Fi / hotspot).
+2. Grant nearby Wi‑Fi, microphone, and notification permissions when asked.
+3. Host → **Host Party** → **Start Audio Stream** → accept screen/audio capture dialog.
+4. Clients → **Join Party** → wait for clock sync → play Spotify/YouTube on the host.
+5. Use the client **Bluetooth / speaker offset** slider if a BT speaker lags.
 
 ```bash
 ./gradlew :app:assembleDebug :app:testDebugUnitTest
@@ -63,8 +60,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 | Path | Role |
 |------|------|
-| `data/sync/TimeSyncManager.kt` | Singleton NTP offset + sync loop |
-| `data/network/TcpHostServer.kt` | Host sockets + immediate SYNC_RES |
-| `data/network/TcpClient.kt` | Client + periodic SYNC_REQ |
-| `data/network/NsdHelper.kt` | NSD advertise / discover |
-| `data/repository/PartyRepository.kt` | Orchestration |
+| `service/AudioCaptureService.kt` | Foreground MediaProjection capture |
+| `data/audio/SystemAudioCapturer.kt` | AudioPlaybackCapture API |
+| `data/audio/UdpAudioBroadcaster.kt` | Host UDP + PTS |
+| `data/audio/UdpAudioReceiver.kt` | Client UDP |
+| `data/audio/ScheduledAudioPlayer.kt` | Timed `AudioTrack` playback |
+| `data/sync/TimeSyncManager.kt` | Shared clock |

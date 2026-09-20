@@ -37,6 +37,8 @@ fun HostScreen(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onBack: () -> Unit,
+    onRequestStartStreaming: () -> Unit,
+    onStopStreaming: () -> Unit,
 ) {
     LaunchedEffect(Unit) {
         if (state.status is ConnectionStatus.Idle ||
@@ -97,6 +99,20 @@ fun HostScreen(
             }
 
             AnimatedVisibility(
+                visible = state.audioStatusMessage != null || state.audioStreaming,
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                Text(
+                    text = state.audioStatusMessage
+                        ?: if (state.audioStreaming) "Streaming system audio over UDP" else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TealBright,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+
+            AnimatedVisibility(
                 visible = state.errorMessage != null,
                 enter = fadeIn(),
                 exit = fadeOut(),
@@ -109,7 +125,7 @@ fun HostScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(20.dp))
             Text(
                 text = "Connected Devices",
                 style = MaterialTheme.typography.titleLarge,
@@ -144,7 +160,17 @@ fun HostScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+            if (isLive) {
+                PrimaryActionButton(
+                    label = if (state.audioStreaming) "Stop Audio Stream" else "Start Audio Stream",
+                    onClick = {
+                        if (state.audioStreaming) onStopStreaming() else onRequestStartStreaming()
+                    },
+                    emphasized = !state.audioStreaming,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+            }
             PrimaryActionButton(
                 label = "Stop Hosting",
                 onClick = {

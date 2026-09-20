@@ -56,6 +56,18 @@ object ProtocolCodec {
                 put("t2", message.t2)
                 put("t3", message.t3)
             }
+            is ProtocolMessage.AudioSession -> buildJsonObject {
+                put("type", message.type)
+                put("udpPort", message.udpPort)
+                put("sampleRate", message.sampleRate)
+                put("channelCount", message.channelCount)
+                put("presentationBufferMs", message.presentationBufferMs)
+                put("encoding", message.encoding)
+            }
+            is ProtocolMessage.AudioStop -> buildJsonObject {
+                put("type", message.type)
+                put("reason", message.reason)
+            }
             is ProtocolMessage.Disconnect -> buildJsonObject {
                 put("type", message.type)
                 put("reason", message.reason)
@@ -103,6 +115,16 @@ object ProtocolCodec {
                     t1 = obj.requireLong("t1"),
                     t2 = obj.requireLong("t2"),
                     t3 = obj.requireLong("t3"),
+                )
+                ProtocolMessage.TYPE_AUDIO_SESSION -> ProtocolMessage.AudioSession(
+                    udpPort = obj.requireLong("udpPort").toInt(),
+                    sampleRate = obj.requireLong("sampleRate").toInt(),
+                    channelCount = obj.requireLong("channelCount").toInt(),
+                    presentationBufferMs = obj.requireLong("presentationBufferMs"),
+                    encoding = obj.string("encoding") ?: "PCM_16BIT",
+                )
+                ProtocolMessage.TYPE_AUDIO_STOP -> ProtocolMessage.AudioStop(
+                    reason = obj.string("reason") ?: "host_stopped",
                 )
                 ProtocolMessage.TYPE_DISCONNECT -> ProtocolMessage.Disconnect(
                     reason = obj.string("reason") ?: "bye",

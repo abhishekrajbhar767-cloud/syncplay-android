@@ -79,6 +79,8 @@ class TcpClient(
         data class Welcome(val hostName: String, val sessionId: String) : ClientEvent
         data class RoundTrip(val millis: Long) : ClientEvent
         data class ClockSynced(val offsetMs: Long, val rttMs: Long) : ClientEvent
+        data class AudioSessionStarted(val session: ProtocolMessage.AudioSession) : ClientEvent
+        data class AudioSessionStopped(val reason: String) : ClientEvent
         data class Disconnected(val reason: String) : ClientEvent
     }
 
@@ -197,6 +199,12 @@ class TcpClient(
                                 )
                             )
                         }
+                    }
+                    is ProtocolMessage.AudioSession -> {
+                        _events.tryEmit(ClientEvent.AudioSessionStarted(message))
+                    }
+                    is ProtocolMessage.AudioStop -> {
+                        _events.tryEmit(ClientEvent.AudioSessionStopped(message.reason))
                     }
                     is ProtocolMessage.Disconnect -> {
                         cleanup(emitFailed = false, message = message.reason)
