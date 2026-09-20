@@ -81,6 +81,9 @@ class TcpClient(
         data class ClockSynced(val offsetMs: Long, val rttMs: Long) : ClientEvent
         data class AudioSessionStarted(val session: ProtocolMessage.AudioSession) : ClientEvent
         data class AudioSessionStopped(val reason: String) : ClientEvent
+        data class ChannelAssigned(val channel: String) : ClientEvent
+        data class CalibrationModeChanged(val enabled: Boolean) : ClientEvent
+        data class EightDModeChanged(val enabled: Boolean) : ClientEvent
         data class Disconnected(val reason: String) : ClientEvent
     }
 
@@ -205,6 +208,15 @@ class TcpClient(
                     }
                     is ProtocolMessage.AudioStop -> {
                         _events.tryEmit(ClientEvent.AudioSessionStopped(message.reason))
+                    }
+                    is ProtocolMessage.ChannelAssign -> {
+                        _events.tryEmit(ClientEvent.ChannelAssigned(message.channel))
+                    }
+                    is ProtocolMessage.CalibrationMode -> {
+                        _events.tryEmit(ClientEvent.CalibrationModeChanged(message.enabled))
+                    }
+                    is ProtocolMessage.EightDMode -> {
+                        _events.tryEmit(ClientEvent.EightDModeChanged(message.enabled))
                     }
                     is ProtocolMessage.Disconnect -> {
                         cleanup(emitFailed = false, message = message.reason)

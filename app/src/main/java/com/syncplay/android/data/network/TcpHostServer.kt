@@ -145,6 +145,14 @@ class TcpHostServer(
         }
     }
 
+    fun sendTo(deviceId: String, message: ProtocolMessage) {
+        scope.launch {
+            clients[deviceId]?.let { client ->
+                runCatching { client.send(message) }
+            }
+        }
+    }
+
     private fun tryBind(preferredPort: Int): ServerSocket {
         return try {
             ServerSocket(preferredPort).apply {

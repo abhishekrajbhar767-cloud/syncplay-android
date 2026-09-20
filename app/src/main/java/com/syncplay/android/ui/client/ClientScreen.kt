@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import com.syncplay.android.data.model.ConnectionStatus
+import com.syncplay.android.data.model.SpeakerChannel
 import com.syncplay.android.ui.components.PrimaryActionButton
 import com.syncplay.android.ui.components.StatusPulse
 import com.syncplay.android.ui.components.SyncPlayBackground
@@ -138,6 +139,26 @@ fun ClientScreen(
                             Text(
                                 text = state.audioStatusMessage
                                     ?: if (state.playbackActive) "Playing scheduled UDP audio" else "",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TealBright,
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Speaker role · ${
+                                when (state.speakerChannel) {
+                                    SpeakerChannel.STEREO -> "Stereo"
+                                    SpeakerChannel.LEFT_CHANNEL -> "Left"
+                                    SpeakerChannel.RIGHT_CHANNEL -> "Right"
+                                }
+                            }",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Mist,
+                        )
+                        if (state.calibrationHint) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Calibration active — nudge the slider until beeps fuse into one click",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TealBright,
                             )

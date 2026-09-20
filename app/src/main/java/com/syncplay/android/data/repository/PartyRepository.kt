@@ -12,6 +12,7 @@ import com.syncplay.android.data.model.ConnectionStatus
 import com.syncplay.android.data.model.DiscoveredHost
 import com.syncplay.android.data.model.PartyRole
 import com.syncplay.android.data.model.ProtocolMessage
+import com.syncplay.android.data.model.SpeakerChannel
 import com.syncplay.android.data.network.DeviceIdentity
 import com.syncplay.android.data.network.MulticastLockManager
 import com.syncplay.android.data.network.NetworkConstants
@@ -27,10 +28,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Orchestrates Phase 1 networking, Phase 2 clock sync, and Phase 3 UDP audio streaming.
+ * Orchestrates Phases 1–4: networking, clock sync, UDP audio, calibration, and spatial routing.
  */
 class PartyRepository(context: Context) {
     private val tag = "SyncPlayRepo"
@@ -88,6 +90,24 @@ class PartyRepository(context: Context) {
     private val _clientPlaybackActive = MutableStateFlow(false)
     val clientPlaybackActive: StateFlow<Boolean> = _clientPlaybackActive.asStateFlow()
 
+    private val _channelAssignments = MutableStateFlow<Map<String, SpeakerChannel>>(emptyMap())
+    val channelAssignments: StateFlow<Map<String, SpeakerChannel>> = _channelAssignments.asStateFlow()
+
+    private val _calibrationEnabled = MutableStateFlow(false)
+    val calibrationEnabled: StateFlow<Boolean> = _calibrationEnabled.asStateFlow()
+
+    private val _eightDEnabled = MutableStateFlow(false)
+    val eightDEnabled: StateFlow<Boolean> = _eightDEnabled.asStateFlow()
+
+    private val _clientSpeakerChannel = MutableStateFlow(SpeakerChannel.STEREO)
+    val clientSpeakerChannel: StateFlow<SpeakerChannel> = _clientSpeakerChannel.asStateFlow()
+
+    private val _clientCalibrationHint = MutableStateFlow(false)
+    val clientCalibrationHint: StateFlow<Boolean> = _clientCalibrationHint.asStateFlow()
+
+    /** True once MediaProjection system capture has been started this session. */
+    private val _hasSystemCapture = MutableStateFlow(false)
+
     suspend fun startHosting() {
         stopAllInternal(clearStatus = false)
         _role.value = PartyRole.HOST
@@ -105,7 +125,16 @@ class PartyRepository(context: Context) {
 
             hostDevicesJob = scope.launch {
                 server.connectedDevices.collect { devices ->
-                    _connectedDevices.value = devices
+                    val channels = _channelAssignments.value
+                    _connectedDevices.value = devices.map { device ->
+                        device.copy(
+                            speakerChannel = channels[device.deviceId] ?: SpeakerChannel.STEREO,
+                        )
+                    }
+                    // Drop assignments for disconnected peers.
+                    _channelAssignments.update { map ->
+                        map.filterKeys { id -> devices.any { it.deviceId == id } }
+                    }
                     if (_audioStreaming.value) {
                         AudioCaptureService.refreshTargets(appContext)
                     }
@@ -201,6 +230,22 @@ class PartyRepository(context: Context) {
                 when (event) {
                     is TcpClient.ClientEvent.AudioSessionStarted -> startClientAudio(event.session)
                     is TcpClient.ClientEvent.AudioSessionStopped -> stopClientAudio()
+                    is TcpClient.ClientEvent.ChannelAssigned -> {
+                        val channel = SpeakerChannel.fromWire(event.channel)
+                        _clientSpeakerChannel.value = channel
+                        audioPlayer?.setSpeakerChannel(channel)
+                    }
+                    is TcpClient.ClientEvent.CalibrationModeChanged -> {
+                        _clientCalibrationHint.value = event.enabled
+                        _audioStatusMessage.value = if (event.enabled) {
+                            "Calibration beep — align speakers with the latency slider"
+                        } else {
+                            "Playing UDP audio"
+                        }
+                    }
+                    is TcpClient.ClientEvent.EightDModeChanged -> {
+                        // Informational; pan is applied on the host.
+                    }
                     else -> Unit
                 }
             }
@@ -228,6 +273,7 @@ class PartyRepository(context: Context) {
             return
         }
         _audioStatusMessage.value = "Starting capture…"
+        _hasSystemCapture.value = true
         AudioCaptureService.start(appContext, resultCode, data)
     }
 
@@ -235,9 +281,54 @@ class PartyRepository(context: Context) {
         AudioCaptureService.stop(appContext)
     }
 
+    fun setCalibrationBeepEnabled(enabled: Boolean) {
+        if (_role.value != PartyRole.HOST) return
+        if (enabled) {
+            if (!_audioStreaming.value) {
+                AudioCaptureService.startCalibrationOnly(appContext)
+            } else {
+                AudioCaptureService.setCalibrationMode(appContext, true)
+            }
+        } else {
+            AudioCaptureService.setCalibrationMode(appContext, false)
+            if (!_hasSystemCapture.value) {
+                AudioCaptureService.stop(appContext)
+            }
+        }
+    }
+
+    fun setEightDEnabled(enabled: Boolean) {
+        if (_role.value != PartyRole.HOST) return
+        _eightDEnabled.value = enabled
+        AudioCaptureService.setEightDMode(appContext, enabled)
+        hostServer?.broadcast(ProtocolMessage.EightDMode(enabled = enabled))
+    }
+
+    fun assignSpeakerChannel(deviceId: String, channel: SpeakerChannel) {
+        if (_role.value != PartyRole.HOST) return
+        _channelAssignments.update { it + (deviceId to channel) }
+        _connectedDevices.update { list ->
+            list.map { device ->
+                if (device.deviceId == deviceId) device.copy(speakerChannel = channel) else device
+            }
+        }
+        hostServer?.sendTo(
+            deviceId,
+            ProtocolMessage.ChannelAssign(deviceId = deviceId, channel = channel.name),
+        )
+        if (_audioStreaming.value) {
+            AudioCaptureService.refreshTargets(appContext)
+        }
+    }
+
     fun onHostAudioStreamingStarted() {
         _audioStreaming.value = true
-        _audioStatusMessage.value = "Streaming system audio (UDP :${AudioStreamConfig.UDP_PORT})"
+        val status = if (_calibrationEnabled.value) {
+            "Calibration beep streaming (UDP :${AudioStreamConfig.UDP_PORT})"
+        } else {
+            "Streaming system audio (UDP :${AudioStreamConfig.UDP_PORT})"
+        }
+        _audioStatusMessage.value = status
         val session = ProtocolMessage.AudioSession(
             udpPort = AudioStreamConfig.UDP_PORT,
             sampleRate = AudioStreamConfig.SAMPLE_RATE_HZ,
@@ -245,6 +336,13 @@ class PartyRepository(context: Context) {
             presentationBufferMs = AudioStreamConfig.PRESENTATION_BUFFER_MS,
         )
         hostServer?.broadcastAudioSession(session)
+        // Re-push channel assignments to late joiners / reconnects.
+        _channelAssignments.value.forEach { (id, channel) ->
+            hostServer?.sendTo(id, ProtocolMessage.ChannelAssign(deviceId = id, channel = channel.name))
+        }
+        if (_eightDEnabled.value) {
+            hostServer?.broadcast(ProtocolMessage.EightDMode(enabled = true))
+        }
         AudioCaptureService.refreshTargets(appContext)
     }
 
@@ -253,12 +351,32 @@ class PartyRepository(context: Context) {
             hostServer?.broadcastAudioStop()
         }
         _audioStreaming.value = false
+        _calibrationEnabled.value = false
         _audioStatusMessage.value = null
+        _hasSystemCapture.value = false
     }
 
     fun onHostAudioStreamingFailed(message: String?) {
         _audioStreaming.value = false
+        _calibrationEnabled.value = false
+        _hasSystemCapture.value = false
         _audioStatusMessage.value = message ?: "Audio capture failed"
+    }
+
+    fun onCalibrationModeChanged(enabled: Boolean) {
+        _calibrationEnabled.value = enabled
+        hostServer?.broadcast(ProtocolMessage.CalibrationMode(enabled = enabled))
+        if (_audioStreaming.value) {
+            _audioStatusMessage.value = if (enabled) {
+                "Calibration beep — clients adjust latency until clicks align"
+            } else {
+                "Streaming system audio (UDP :${AudioStreamConfig.UDP_PORT})"
+            }
+        }
+    }
+
+    fun onEightDModeChanged(enabled: Boolean) {
+        _eightDEnabled.value = enabled
     }
 
     fun setManualOffsetMs(offsetMs: Int) {
@@ -286,6 +404,7 @@ class PartyRepository(context: Context) {
         stopClientAudio()
         val player = ScheduledAudioPlayer().also {
             it.setManualOffsetMs(_manualOffsetMs.value)
+            it.setSpeakerChannel(_clientSpeakerChannel.value)
             it.start()
         }
         audioPlayer = player
@@ -314,6 +433,7 @@ class PartyRepository(context: Context) {
         runCatching { audioPlayer?.stop() }
         audioPlayer = null
         _clientPlaybackActive.value = false
+        _clientCalibrationHint.value = false
     }
 
     private fun stopAllInternal(clearStatus: Boolean) {
@@ -344,6 +464,11 @@ class PartyRepository(context: Context) {
         _sessionId.value = null
         _audioStreaming.value = false
         _audioStatusMessage.value = null
+        _channelAssignments.value = emptyMap()
+        _calibrationEnabled.value = false
+        _eightDEnabled.value = false
+        _hasSystemCapture.value = false
+        _clientSpeakerChannel.value = SpeakerChannel.STEREO
         _role.value = PartyRole.NONE
         if (clearStatus) {
             _status.value = ConnectionStatus.Idle

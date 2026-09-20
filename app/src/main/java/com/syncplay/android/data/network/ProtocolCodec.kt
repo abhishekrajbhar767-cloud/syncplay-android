@@ -4,14 +4,14 @@ import com.syncplay.android.data.model.ProtocolMessage
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /**
- * Encodes / decodes line-framed [ProtocolMessage] JSON without requiring a sealed-class
- * polymorphism plugin setup beyond a small manual mapper (keeps the wire format explicit).
+ * Encodes / decodes line-framed [ProtocolMessage] JSON.
  */
 object ProtocolCodec {
     val json: Json = Json {
@@ -67,6 +67,19 @@ object ProtocolCodec {
             is ProtocolMessage.AudioStop -> buildJsonObject {
                 put("type", message.type)
                 put("reason", message.reason)
+            }
+            is ProtocolMessage.ChannelAssign -> buildJsonObject {
+                put("type", message.type)
+                put("deviceId", message.deviceId)
+                put("channel", message.channel)
+            }
+            is ProtocolMessage.CalibrationMode -> buildJsonObject {
+                put("type", message.type)
+                put("enabled", message.enabled)
+            }
+            is ProtocolMessage.EightDMode -> buildJsonObject {
+                put("type", message.type)
+                put("enabled", message.enabled)
             }
             is ProtocolMessage.Disconnect -> buildJsonObject {
                 put("type", message.type)
@@ -126,6 +139,16 @@ object ProtocolCodec {
                 ProtocolMessage.TYPE_AUDIO_STOP -> ProtocolMessage.AudioStop(
                     reason = obj.string("reason") ?: "host_stopped",
                 )
+                ProtocolMessage.TYPE_CHANNEL_ASSIGN -> ProtocolMessage.ChannelAssign(
+                    deviceId = obj.requireString("deviceId"),
+                    channel = obj.requireString("channel"),
+                )
+                ProtocolMessage.TYPE_CALIBRATION_MODE -> ProtocolMessage.CalibrationMode(
+                    enabled = obj.boolean("enabled") ?: false,
+                )
+                ProtocolMessage.TYPE_EIGHT_D_MODE -> ProtocolMessage.EightDMode(
+                    enabled = obj.boolean("enabled") ?: false,
+                )
                 ProtocolMessage.TYPE_DISCONNECT -> ProtocolMessage.Disconnect(
                     reason = obj.string("reason") ?: "bye",
                 )
@@ -140,6 +163,10 @@ object ProtocolCodec {
 
     private fun JsonObject.string(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull
+
+    private fun JsonObject.boolean(key: String): Boolean? =
+        (this[key] as? JsonPrimitive)?.booleanOrNull
+            ?: string(key)?.toBooleanStrictOrNull()
 
     private fun JsonObject.requireString(key: String): String =
         string(key) ?: error("Missing string field: $key")

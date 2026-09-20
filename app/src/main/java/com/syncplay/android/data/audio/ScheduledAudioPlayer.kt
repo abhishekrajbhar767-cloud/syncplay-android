@@ -5,6 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Process
 import android.util.Log
+import com.syncplay.android.data.model.SpeakerChannel
 import com.syncplay.android.data.sync.TimeSyncManager
 import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -23,6 +24,9 @@ class ScheduledAudioPlayer {
     private val manualOffsetMs = AtomicInteger(0)
     private val playedCount = AtomicLong(0)
     private val droppedLate = AtomicLong(0)
+
+    @Volatile
+    private var speakerChannel: SpeakerChannel = SpeakerChannel.STEREO
 
     private val queue = PriorityBlockingQueue<TimedChunk>(64, compareBy { it.presentationTimestampMs })
 
@@ -50,6 +54,10 @@ class ScheduledAudioPlayer {
     }
 
     fun getManualOffsetMs(): Int = manualOffsetMs.get()
+
+    fun setSpeakerChannel(channel: SpeakerChannel) {
+        speakerChannel = channel
+    }
 
     fun start() {
         check(running.compareAndSet(false, true)) { "Player already started" }
@@ -86,16 +94,16 @@ class ScheduledAudioPlayer {
 
     fun enqueue(packet: UdpAudioPacket) {
         if (!running.get()) return
-        // Bound queue depth (~1s of 10ms frames).
         while (queue.size > 100) {
             queue.poll()
             droppedLate.incrementAndGet()
         }
+        val pcm = PcmChannelRouter.applyCopy(packet.pcm, packet.pcm.size, speakerChannel)
         queue.offer(
             TimedChunk(
                 presentationTimestampMs = packet.presentationTimestampMs,
                 sequence = packet.sequence,
-                pcm = packet.pcm,
+                pcm = pcm,
             )
         )
     }

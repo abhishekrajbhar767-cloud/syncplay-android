@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.syncplay.android.data.model.ConnectedDevice
 import com.syncplay.android.data.model.ConnectionStatus
+import com.syncplay.android.data.model.SpeakerChannel
 import com.syncplay.android.data.repository.PartyRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +23,8 @@ data class HostUiState(
     val errorMessage: String? = null,
     val audioStreaming: Boolean = false,
     val audioStatusMessage: String? = null,
+    val calibrationEnabled: Boolean = false,
+    val eightDEnabled: Boolean = false,
 )
 
 class HostViewModel(
@@ -37,11 +40,16 @@ class HostViewModel(
         NetworkingSlice(status, devices, addresses, port)
     }
 
-    val uiState: StateFlow<HostUiState> = combine(
-        networking,
+    private val audio = combine(
         repository.audioStreaming,
         repository.audioStatusMessage,
-    ) { net, streaming, audioMsg ->
+        repository.calibrationEnabled,
+        repository.eightDEnabled,
+    ) { streaming, msg, calib, eightD ->
+        AudioSlice(streaming, msg, calib, eightD)
+    }
+
+    val uiState: StateFlow<HostUiState> = combine(networking, audio) { net, aud ->
         HostUiState(
             status = net.status,
             devices = net.devices,
@@ -50,8 +58,10 @@ class HostViewModel(
             hostName = repository.deviceName,
             isBusy = net.status is ConnectionStatus.Starting,
             errorMessage = (net.status as? ConnectionStatus.Failed)?.message,
-            audioStreaming = streaming,
-            audioStatusMessage = audioMsg,
+            audioStreaming = aud.streaming,
+            audioStatusMessage = aud.message,
+            calibrationEnabled = aud.calibration,
+            eightDEnabled = aud.eightD,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -78,11 +88,30 @@ class HostViewModel(
         repository.stopHostAudioStreaming()
     }
 
+    fun setCalibrationBeepEnabled(enabled: Boolean) {
+        repository.setCalibrationBeepEnabled(enabled)
+    }
+
+    fun setEightDEnabled(enabled: Boolean) {
+        repository.setEightDEnabled(enabled)
+    }
+
+    fun assignSpeakerChannel(deviceId: String, channel: SpeakerChannel) {
+        repository.assignSpeakerChannel(deviceId, channel)
+    }
+
     private data class NetworkingSlice(
         val status: ConnectionStatus,
         val devices: List<ConnectedDevice>,
         val addresses: List<String>,
         val port: Int?,
+    )
+
+    private data class AudioSlice(
+        val streaming: Boolean,
+        val message: String?,
+        val calibration: Boolean,
+        val eightD: Boolean,
     )
 
     companion object {

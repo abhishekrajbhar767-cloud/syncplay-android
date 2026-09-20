@@ -1,10 +1,10 @@
 package com.syncplay.android.data.model
 
 /**
- * Wire protocol for the SyncPlay control channel (Phases 1–3).
+ * Wire protocol for the SyncPlay control channel (Phases 1–4).
  *
  * Framing: one UTF-8 JSON object per line (`\n` delimited) over a persistent TCP socket.
- * Phase 3 audio PCM rides a separate UDP datagram path announced via [AudioSession].
+ * Phase 3 audio PCM rides UDP; Phase 4 adds per-client [ChannelAssign] and calibration mode signaling.
  */
 sealed interface ProtocolMessage {
     val type: String
@@ -49,9 +49,6 @@ sealed interface ProtocolMessage {
         override val type: String = TYPE_SYNC_RES,
     ) : ProtocolMessage
 
-    /**
-     * Host → Client: UDP audio session is live; bind [udpPort] and schedule PCM by PTS.
-     */
     data class AudioSession(
         val udpPort: Int,
         val sampleRate: Int,
@@ -61,10 +58,34 @@ sealed interface ProtocolMessage {
         override val type: String = TYPE_AUDIO_SESSION,
     ) : ProtocolMessage
 
-    /** Host → Client: stop consuming UDP audio. */
     data class AudioStop(
         val reason: String = "host_stopped",
         override val type: String = TYPE_AUDIO_STOP,
+    ) : ProtocolMessage
+
+    /**
+     * Host → Client: assign spatial speaker role for this device.
+     */
+    data class ChannelAssign(
+        val deviceId: String,
+        val channel: String,
+        override val type: String = TYPE_CHANNEL_ASSIGN,
+    ) : ProtocolMessage
+
+    /**
+     * Host → all clients: calibration beep mode enabled/disabled (UI hint; audio is in the UDP stream).
+     */
+    data class CalibrationMode(
+        val enabled: Boolean,
+        override val type: String = TYPE_CALIBRATION_MODE,
+    ) : ProtocolMessage
+
+    /**
+     * Host → all clients: 8D experience toggle (informational; pan applied on host before UDP).
+     */
+    data class EightDMode(
+        val enabled: Boolean,
+        override val type: String = TYPE_EIGHT_D_MODE,
     ) : ProtocolMessage
 
     data class Disconnect(
@@ -87,6 +108,9 @@ sealed interface ProtocolMessage {
         const val TYPE_SYNC_RES = "SYNC_RES"
         const val TYPE_AUDIO_SESSION = "AUDIO_SESSION"
         const val TYPE_AUDIO_STOP = "AUDIO_STOP"
+        const val TYPE_CHANNEL_ASSIGN = "CHANNEL_ASSIGN"
+        const val TYPE_CALIBRATION_MODE = "CALIBRATION_MODE"
+        const val TYPE_EIGHT_D_MODE = "EIGHT_D_MODE"
         const val TYPE_DISCONNECT = "DISCONNECT"
         const val TYPE_ERROR = "ERROR"
     }

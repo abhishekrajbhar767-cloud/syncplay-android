@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.syncplay.android.data.model.ConnectionStatus
 import com.syncplay.android.data.model.DiscoveredHost
+import com.syncplay.android.data.model.SpeakerChannel
 import com.syncplay.android.data.repository.PartyRepository
 import com.syncplay.android.data.sync.TimeSyncManager
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,6 +22,8 @@ data class ClientUiState(
     val manualOffsetMs: Int = 0,
     val playbackActive: Boolean = false,
     val audioStatusMessage: String? = null,
+    val speakerChannel: SpeakerChannel = SpeakerChannel.STEREO,
+    val calibrationHint: Boolean = false,
 )
 
 class ClientViewModel(
@@ -35,21 +38,28 @@ class ClientViewModel(
         ConnectionSlice(status, hosts, timeSync)
     }
 
-    val uiState: StateFlow<ClientUiState> = combine(
-        connection,
+    private val playback = combine(
         repository.manualOffsetMs,
         repository.clientPlaybackActive,
         repository.audioStatusMessage,
-    ) { conn, offset, playback, audioMsg ->
+        repository.clientSpeakerChannel,
+        repository.clientCalibrationHint,
+    ) { offset, active, audioMsg, channel, calib ->
+        PlaybackSlice(offset, active, audioMsg, channel, calib)
+    }
+
+    val uiState: StateFlow<ClientUiState> = combine(connection, playback) { conn, play ->
         ClientUiState(
             status = conn.status,
             discoveredHosts = conn.hosts,
             deviceName = repository.deviceName,
             errorMessage = (conn.status as? ConnectionStatus.Failed)?.message,
             timeSync = conn.timeSync,
-            manualOffsetMs = offset,
-            playbackActive = playback,
-            audioStatusMessage = audioMsg,
+            manualOffsetMs = play.offset,
+            playbackActive = play.active,
+            audioStatusMessage = play.audioMsg,
+            speakerChannel = play.channel,
+            calibrationHint = play.calibration,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -73,6 +83,14 @@ class ClientViewModel(
         val status: ConnectionStatus,
         val hosts: List<DiscoveredHost>,
         val timeSync: TimeSyncManager.SyncState,
+    )
+
+    private data class PlaybackSlice(
+        val offset: Int,
+        val active: Boolean,
+        val audioMsg: String?,
+        val channel: SpeakerChannel,
+        val calibration: Boolean,
     )
 
     companion object {
