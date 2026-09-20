@@ -6,7 +6,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
@@ -45,6 +44,18 @@ object ProtocolCodec {
                 put("sentAtEpochMs", message.sentAtEpochMs)
                 put("receivedAtEpochMs", message.receivedAtEpochMs)
             }
+            is ProtocolMessage.SyncReq -> buildJsonObject {
+                put("type", message.type)
+                put("syncId", message.syncId)
+                put("t1", message.t1)
+            }
+            is ProtocolMessage.SyncRes -> buildJsonObject {
+                put("type", message.type)
+                put("syncId", message.syncId)
+                put("t1", message.t1)
+                put("t2", message.t2)
+                put("t3", message.t3)
+            }
             is ProtocolMessage.Disconnect -> buildJsonObject {
                 put("type", message.type)
                 put("reason", message.reason)
@@ -82,6 +93,16 @@ object ProtocolCodec {
                     sentAtEpochMs = obj.requireLong("sentAtEpochMs"),
                     receivedAtEpochMs = obj.longOrNull("receivedAtEpochMs")
                         ?: System.currentTimeMillis(),
+                )
+                ProtocolMessage.TYPE_SYNC_REQ -> ProtocolMessage.SyncReq(
+                    syncId = obj.requireLong("syncId"),
+                    t1 = obj.requireLong("t1"),
+                )
+                ProtocolMessage.TYPE_SYNC_RES -> ProtocolMessage.SyncRes(
+                    syncId = obj.requireLong("syncId"),
+                    t1 = obj.requireLong("t1"),
+                    t2 = obj.requireLong("t2"),
+                    t3 = obj.requireLong("t3"),
                 )
                 ProtocolMessage.TYPE_DISCONNECT -> ProtocolMessage.Disconnect(
                     reason = obj.string("reason") ?: "bye",

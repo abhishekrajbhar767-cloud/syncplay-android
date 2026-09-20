@@ -1,6 +1,5 @@
 package com.syncplay.android.ui.client
 
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -117,6 +116,18 @@ fun ClientScreen(
                                 color = Mist,
                             )
                         }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        val sync = state.timeSync
+                        Text(
+                            text = if (sync.isSynced) {
+                                val rtt = sync.rttMs?.let { "$it ms RTT" } ?: "—"
+                                "Clock synced · offset ${sync.offsetMs} ms · $rtt"
+                            } else {
+                                "Synchronizing clocks…"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (sync.isSynced) TealBright else Mist,
+                        )
                     }
                     is ConnectionStatus.Searching -> {
                         Spacer(modifier = Modifier.height(16.dp))

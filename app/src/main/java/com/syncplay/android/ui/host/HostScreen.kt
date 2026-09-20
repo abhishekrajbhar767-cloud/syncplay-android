@@ -78,6 +78,15 @@ fun HostScreen(
             Spacer(modifier = Modifier.height(20.dp))
             StatusPulse(active = isLive, label = statusLabel)
 
+            if (isLive) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Clock authority · clients NTP-sync every 3–5s",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Mist,
+                )
+            }
+
             if (state.localAddresses.isNotEmpty() && state.port != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
