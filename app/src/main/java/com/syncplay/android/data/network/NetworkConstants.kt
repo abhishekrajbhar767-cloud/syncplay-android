@@ -1,7 +1,7 @@
 package com.syncplay.android.data.network
 
 /**
- * Shared constants for NSD advertising and the Phase 1 control TCP channel.
+ * Shared constants for NSD advertising and the control TCP channel (Phases 1–2).
  */
 object NetworkConstants {
     /** Zeroconf / NSD service type. Trailing protocol is required by Android NSD. */
@@ -23,8 +23,18 @@ object NetworkConstants {
     const val SOCKET_CONNECT_TIMEOUT_MS = 5_000
     const val SOCKET_SO_TIMEOUT_MS = 10_000
 
-    /** Max concurrent client sockets a host will accept in Phase 1. */
+    /** Max concurrent client sockets a host will accept. */
     const val MAX_CLIENTS = 16
+
+    /** Phase 2: NTP sync loop bounds (jittered between min and max). */
+    const val TIME_SYNC_INTERVAL_MIN_MS = 3_000L
+    const val TIME_SYNC_INTERVAL_MAX_MS = 5_000L
+
+    /** Reject sync samples whose RTT exceeds this (likely asymmetric / stalled). */
+    const val TIME_SYNC_MAX_RTT_MS = 500L
+
+    /** Keep the N lowest-RTT recent samples for a stable offset estimate. */
+    const val TIME_SYNC_SAMPLE_WINDOW = 8
 
     const val TXT_ATTR_DEVICE_NAME = "deviceName"
     const val TXT_ATTR_DEVICE_ID = "deviceId"

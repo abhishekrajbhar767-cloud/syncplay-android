@@ -14,7 +14,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -35,7 +34,8 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Concurrent TCP host that accepts multiple client sockets, runs HELLO/WELCOME handshake,
- * and maintains per-client heartbeat (PING/PONG) for live connection state.
+ * maintains per-client heartbeat (PING/PONG), and answers Phase 2 NTP [ProtocolMessage.SyncReq]
+ * packets with low-latency [ProtocolMessage.SyncRes] (T2/T3).
  *
  * Instances are single-use: create a new [TcpHostServer] after [stop].
  */
@@ -212,6 +212,16 @@ class TcpHostServer(
                         session.lastHeartbeatEpochMs = System.currentTimeMillis()
                         publishDevices()
                     }
+                    is ProtocolMessage.SyncReq -> {
+                        // Stamp T2 on receipt; T3 is stamped inside sendSyncRes immediately before flush.
+                        val t2 = System.currentTimeMillis()
+                        session.sendSyncRes(
+                            syncId = message.syncId,
+                            t1 = message.t1,
+                            t2 = t2,
+                        )
+                        session.lastHeartbeatEpochMs = System.currentTimeMillis()
+                    }
                     is ProtocolMessage.Disconnect -> {
                         Log.i(tag, "Client ${hello.deviceName} disconnected: ${message.reason}")
                         break
@@ -298,6 +308,27 @@ class TcpHostServer(
         suspend fun send(message: ProtocolMessage) {
             writeMutex.withLock {
                 writer.write(ProtocolCodec.encode(message))
+                writer.newLine()
+                writer.flush()
+            }
+        }
+
+        /**
+         * Low-latency NTP response: acquire the write lock, stamp T3, then flush immediately.
+         */
+        suspend fun sendSyncRes(syncId: Long, t1: Long, t2: Long) {
+            writeMutex.withLock {
+                val t3 = System.currentTimeMillis()
+                writer.write(
+                    ProtocolCodec.encode(
+                        ProtocolMessage.SyncRes(
+                            syncId = syncId,
+                            t1 = t1,
+                            t2 = t2,
+                            t3 = t3,
+                        )
+                    )
+                )
                 writer.newLine()
                 writer.flush()
             }

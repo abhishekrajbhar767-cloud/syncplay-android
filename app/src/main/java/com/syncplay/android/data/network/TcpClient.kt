@@ -2,6 +2,7 @@ package com.syncplay.android.data.network
 
 import android.util.Log
 import com.syncplay.android.data.model.ProtocolMessage
+import com.syncplay.android.data.sync.TimeSyncManager
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +33,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Persistent TCP client that connects to a discovered host, completes HELLO/WELCOME,
- * and answers heartbeat PINGs with PONGs.
+ * answers heartbeat PINGs, and drives Phase 2 NTP clock sync via SYNC_REQ / SYNC_RES.
  */
 class TcpClient(
     private val deviceId: String,
@@ -77,6 +78,7 @@ class TcpClient(
     sealed interface ClientEvent {
         data class Welcome(val hostName: String, val sessionId: String) : ClientEvent
         data class RoundTrip(val millis: Long) : ClientEvent
+        data class ClockSynced(val offsetMs: Long, val rttMs: Long) : ClientEvent
         data class Disconnected(val reason: String) : ClientEvent
     }
 
@@ -122,6 +124,14 @@ class TcpClient(
             )
             _events.tryEmit(ClientEvent.Welcome(welcome.hostName, welcome.sessionId))
             Log.i(tag, "Connected to host ${welcome.hostName} @$hostAddress:$port")
+
+            // Phase 2: bind TimeSyncManager to this socket and start 3–5s NTP loop.
+            TimeSyncManager.becomeClient(
+                TimeSyncManager.SyncRequestSender { syncId, t1 ->
+                    sendLocked(ProtocolMessage.SyncReq(syncId = syncId, t1 = t1))
+                }
+            )
+            TimeSyncManager.startPeriodicSync(scope)
 
             readJob = scope.launch { readLoop() }
             watchdogJob = scope.launch { watchdogLoop() }
@@ -169,6 +179,24 @@ class TcpClient(
                             _connectionState.value = current.copy(roundTripMs = rtt)
                         }
                         _events.tryEmit(ClientEvent.RoundTrip(rtt))
+                    }
+                    is ProtocolMessage.SyncRes -> {
+                        // T4 is stamped inside TimeSyncManager.onSyncResponse for accuracy.
+                        TimeSyncManager.onSyncResponse(
+                            syncId = message.syncId,
+                            t1 = message.t1,
+                            t2 = message.t2,
+                            t3 = message.t3,
+                        )
+                        val sync = TimeSyncManager.state.value
+                        if (sync.isSynced && sync.rttMs != null) {
+                            _events.tryEmit(
+                                ClientEvent.ClockSynced(
+                                    offsetMs = sync.offsetMs,
+                                    rttMs = sync.rttMs,
+                                )
+                            )
+                        }
                     }
                     is ProtocolMessage.Disconnect -> {
                         cleanup(emitFailed = false, message = message.reason)
@@ -232,6 +260,8 @@ class TcpClient(
             return
         }
         running.set(false)
+        TimeSyncManager.stopSyncLoop()
+        TimeSyncManager.reset()
         readJob?.cancel()
         watchdogJob?.cancel()
         runCatching { writer?.close() }

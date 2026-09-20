@@ -27,4 +27,17 @@ class ProtocolCodecTest {
         val decodedPong = ProtocolCodec.decode(ProtocolCodec.encode(pong)) as ProtocolMessage.Pong
         assertEquals(150L, decodedPong.receivedAtEpochMs)
     }
+
+    @Test
+    fun syncReqResRoundTrip() {
+        val req = ProtocolMessage.SyncReq(syncId = 42, t1 = 1_000L)
+        val decodedReq = ProtocolCodec.decode(ProtocolCodec.encode(req)) as ProtocolMessage.SyncReq
+        assertEquals(42L, decodedReq.syncId)
+        assertEquals(1_000L, decodedReq.t1)
+
+        val res = ProtocolMessage.SyncRes(syncId = 42, t1 = 1_000L, t2 = 1_010L, t3 = 1_011L)
+        val decodedRes = ProtocolCodec.decode(ProtocolCodec.encode(res)) as ProtocolMessage.SyncRes
+        assertEquals(1_010L, decodedRes.t2)
+        assertEquals(1_011L, decodedRes.t3)
+    }
 }

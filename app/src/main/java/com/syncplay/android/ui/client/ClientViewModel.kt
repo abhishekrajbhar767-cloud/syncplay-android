@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.syncplay.android.data.model.ConnectionStatus
 import com.syncplay.android.data.model.DiscoveredHost
 import com.syncplay.android.data.repository.PartyRepository
+import com.syncplay.android.data.sync.TimeSyncManager
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -16,6 +17,7 @@ data class ClientUiState(
     val discoveredHosts: List<DiscoveredHost> = emptyList(),
     val deviceName: String = "",
     val errorMessage: String? = null,
+    val timeSync: TimeSyncManager.SyncState = TimeSyncManager.SyncState(),
 )
 
 class ClientViewModel(
@@ -25,12 +27,14 @@ class ClientViewModel(
     val uiState: StateFlow<ClientUiState> = combine(
         repository.status,
         repository.discoveredHosts,
-    ) { status, hosts ->
+        repository.timeSyncState,
+    ) { status, hosts, timeSync ->
         ClientUiState(
             status = status,
             discoveredHosts = hosts,
             deviceName = repository.deviceName,
             errorMessage = (status as? ConnectionStatus.Failed)?.message,
+            timeSync = timeSync,
         )
     }.stateIn(
         scope = viewModelScope,

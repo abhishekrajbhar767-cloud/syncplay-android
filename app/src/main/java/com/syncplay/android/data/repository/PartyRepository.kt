@@ -12,6 +12,7 @@ import com.syncplay.android.data.network.NetworkConstants
 import com.syncplay.android.data.network.NsdHelper
 import com.syncplay.android.data.network.TcpClient
 import com.syncplay.android.data.network.TcpHostServer
+import com.syncplay.android.data.sync.TimeSyncManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,8 +23,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Single source of truth for Phase 1 party networking.
- * Owns NSD advertise/discover lifecycle and TCP host/client instances.
+ * Single source of truth for party networking (Phase 1) and clock sync (Phase 2).
+ * Owns NSD advertise/discover lifecycle, TCP host/client instances, and [TimeSyncManager] role.
  */
 class PartyRepository(context: Context) {
     private val tag = "SyncPlayRepo"
@@ -63,11 +64,15 @@ class PartyRepository(context: Context) {
     private val _sessionId = MutableStateFlow<String?>(null)
     val sessionId: StateFlow<String?> = _sessionId.asStateFlow()
 
+    /** Phase 2 clock-sync snapshot (offset / RTT / synced flag). */
+    val timeSyncState: StateFlow<TimeSyncManager.SyncState> = TimeSyncManager.state
+
     suspend fun startHosting() {
         stopAllInternal(clearStatus = false)
         _role.value = PartyRole.HOST
         _status.value = ConnectionStatus.Starting
         _localAddresses.value = DeviceIdentity.localIpv4Addresses()
+        TimeSyncManager.becomeHost()
 
         val server = TcpHostServer(hostId = deviceId, hostName = deviceName)
         hostServer = server
@@ -205,6 +210,7 @@ class PartyRepository(context: Context) {
         hostServer = null
         runCatching { tcpClient?.disconnect() }
         tcpClient = null
+        TimeSyncManager.reset()
 
         _connectedDevices.value = emptyList()
         _discoveredHosts.value = emptyList()
