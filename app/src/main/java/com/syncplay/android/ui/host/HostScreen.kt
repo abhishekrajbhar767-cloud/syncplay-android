@@ -21,7 +21,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.syncplay.android.data.model.ConnectionStatus
-import com.syncplay.android.ui.components.DeviceRow
+import com.syncplay.android.data.model.SpeakerChannel
+import com.syncplay.android.ui.components.ConnectedClientRow
+import com.syncplay.android.ui.components.HostToggleRow
 import com.syncplay.android.ui.components.PrimaryActionButton
 import com.syncplay.android.ui.components.SectionDivider
 import com.syncplay.android.ui.components.StatusPulse
@@ -39,6 +41,9 @@ fun HostScreen(
     onBack: () -> Unit,
     onRequestStartStreaming: () -> Unit,
     onStopStreaming: () -> Unit,
+    onCalibrationToggle: (Boolean) -> Unit,
+    onEightDToggle: (Boolean) -> Unit,
+    onChannelSelected: (deviceId: String, channel: SpeakerChannel) -> Unit,
 ) {
     LaunchedEffect(Unit) {
         if (state.status is ConnectionStatus.Idle ||
@@ -125,7 +130,25 @@ fun HostScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            if (isLive) {
+                Spacer(modifier = Modifier.height(16.dp))
+                SectionDivider()
+                HostToggleRow(
+                    label = if (state.calibrationEnabled) "Stop Calibration Beep" else "Start Calibration Beep",
+                    checked = state.calibrationEnabled,
+                    onCheckedChange = onCalibrationToggle,
+                    supporting = "1 kHz · 50 ms every second — align latency sliders",
+                )
+                HostToggleRow(
+                    label = "8D Experience",
+                    checked = state.eightDEnabled,
+                    onCheckedChange = onEightDToggle,
+                    supporting = "Slow LFO pan rotates the stereo field",
+                )
+                SectionDivider()
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = "Connected Devices",
                 style = MaterialTheme.typography.titleLarge,
@@ -136,7 +159,7 @@ fun HostScreen(
                 text = if (state.devices.isEmpty()) {
                     "Waiting for clients to join…"
                 } else {
-                    "${state.devices.size} live · heartbeat every 2s"
+                    "${state.devices.size} live · assign Left / Right / Stereo"
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = Mist,
@@ -151,10 +174,14 @@ fun HostScreen(
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 items(state.devices, key = { it.deviceId }) { device ->
-                    DeviceRow(
+                    ConnectedClientRow(
                         title = device.deviceName,
                         subtitle = "${device.ipAddress}:${device.port}",
-                        trailing = device.roundTripMs?.let { "${it} ms" },
+                        rttLabel = device.roundTripMs?.let { "${it} ms" },
+                        channel = device.speakerChannel,
+                        onChannelSelected = { channel ->
+                            onChannelSelected(device.deviceId, channel)
+                        },
                     )
                     SectionDivider()
                 }
@@ -163,11 +190,21 @@ fun HostScreen(
             Spacer(modifier = Modifier.height(12.dp))
             if (isLive) {
                 PrimaryActionButton(
-                    label = if (state.audioStreaming) "Stop Audio Stream" else "Start Audio Stream",
-                    onClick = {
-                        if (state.audioStreaming) onStopStreaming() else onRequestStartStreaming()
+                    label = if (state.audioStreaming && !state.calibrationEnabled) {
+                        "Stop Audio Stream"
+                    } else if (state.audioStreaming && state.calibrationEnabled) {
+                        "Stream System Audio"
+                    } else {
+                        "Start Audio Stream"
                     },
-                    emphasized = !state.audioStreaming,
+                    onClick = {
+                        when {
+                            state.audioStreaming && !state.calibrationEnabled -> onStopStreaming()
+                            state.audioStreaming && state.calibrationEnabled -> onRequestStartStreaming()
+                            else -> onRequestStartStreaming()
+                        }
+                    },
+                    emphasized = !(state.audioStreaming && !state.calibrationEnabled),
                 )
                 Spacer(modifier = Modifier.height(10.dp))
             }

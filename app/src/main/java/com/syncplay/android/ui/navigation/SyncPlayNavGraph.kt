@@ -60,6 +60,9 @@ fun SyncPlayNavGraph(
                     }
                 },
                 onStopStreaming = viewModel::stopAudioStreaming,
+                onCalibrationToggle = viewModel::setCalibrationBeepEnabled,
+                onEightDToggle = viewModel::setEightDEnabled,
+                onChannelSelected = viewModel::assignSpeakerChannel,
             )
         }
 

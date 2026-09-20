@@ -14,6 +14,11 @@
     <string name="latency_slider_label">Bluetooth / speaker offset</string>
     <string name="audio_service_title">SyncPlay streaming</string>
     <string name="audio_service_text">Capturing system audio for the party</string>
+    <string name="audio_service_calibration_text">Streaming calibration beeps</string>
     <string name="audio_service_channel">Audio capture</string>
     <string name="audio_service_channel_desc">Keeps SyncPlay audio capture running</string>
+    <string name="start_calibration_beep">Start Calibration Beep</string>
+    <string name="stop_calibration_beep">Stop Calibration Beep</string>
+    <string name="eight_d_experience">8D Experience</string>
+    <string name="speaker_channel">Speaker channel</string>
 </resources>

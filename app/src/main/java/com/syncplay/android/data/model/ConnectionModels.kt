@@ -11,6 +11,7 @@ data class ConnectedDevice(
     val connectedAtEpochMs: Long = System.currentTimeMillis(),
     val lastHeartbeatEpochMs: Long = System.currentTimeMillis(),
     val roundTripMs: Long? = null,
+    val speakerChannel: SpeakerChannel = SpeakerChannel.STEREO,
 )
 
 /**
