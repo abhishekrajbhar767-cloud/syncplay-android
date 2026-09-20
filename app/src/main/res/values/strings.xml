@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SyncPlay</string>
+    <string name="host_party">Host Party</string>
+    <string name="join_party">Join Party</string>
+    <string name="searching_for_host">Searching for Host…</string>
+    <string name="connected_devices">Connected Devices</string>
+    <string name="stop_hosting">Stop Hosting</string>
+    <string name="leave_party">Leave Party</string>
+    <string name="no_clients_yet">Waiting for clients to join…</string>
+</resources>
